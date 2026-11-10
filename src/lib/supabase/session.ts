@@ -55,6 +55,22 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // an access token minted before the block stays valid until it expires; rls already
+  // denies it every row, so end the session here and show the blocked screen
+  if (user && pathname !== ROUTES.BLOCKED) {
+    const { data: isBlocked } = await supabase.rpc('current_user_is_blocked');
+
+    if (isBlocked) {
+      // global scope revokes every refresh token of this user, not just this browser's
+      await supabase.auth.signOut({ scope: 'global' });
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = ROUTES.BLOCKED;
+      const redirectResponse = NextResponse.redirect(redirectUrl);
+      applyResponseCookies(supabaseResponse, redirectResponse);
+      return redirectResponse;
+    }
+  }
+
   if (!user && pathnameMatchesRouteList(pathname, PROTECTED_ROUTES_LIST)) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = ROUTES.LOGIN;

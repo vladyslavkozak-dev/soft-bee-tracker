@@ -267,6 +267,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      current_user_is_blocked: { Args: Record<PropertyKey, never>; Returns: boolean }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
     }
     Enums: {

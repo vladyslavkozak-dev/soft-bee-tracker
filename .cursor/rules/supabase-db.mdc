@@ -55,3 +55,17 @@ Prod: enable the same Custom Access Token hook in the Auth dashboard.
 - Always set `set search_path = '';`.
 - Fully qualify object names in SQL/PLpgSQL.
 - Reuse `public.trigger_set_updated_at`; do not create duplicate updated-at trigger functions.
+
+# Users table access (RBAC)
+
+- Self-service columns on `public.users`: `username`, `first_name`, `last_name`, `phone`, `avatar_url`,
+  `linkedin`, `upwork`. Everything else (role, salary*, positions, email, `is_confirmed`, `is_blocked`, …)
+  is admin-only, enforced by trigger `guard_users_privileged_columns` (raises `42501`).
+- New `public.users` columns are admin-only by default; extend the trigger allow-list only for genuinely
+  self-service fields. Do not rely on client payload shaping (`mapProfileUpdateToUserRow`) for security.
+- Admins (`private.jwt_role() = 'admin'`) may select/update every profile; managers have no extra rights on users.
+- Blocked users: `private.is_secure()` returns false for them, so the restrictive "require secure session"
+  policy denies every table immediately, even for previously issued tokens. The access token hook refuses
+  sign-in/refresh, and `src/lib/supabase/session.ts` signs them out globally via `public.current_user_is_blocked()`.
+  Never add a table without the restrictive policy, or blocking will not cover it.
+- Cover permission changes with pgTAP tests in `supabase/tests/database/` (see `users-rbac.test.sql`).

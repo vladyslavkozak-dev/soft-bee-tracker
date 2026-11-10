@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { ROUTES } from '@/constants';
-import { authKeys, fetchSessionProfile } from '@/lib/api/auth/queries';
+import { authKeys, fetchIsCurrentUserBlocked } from '@/lib/api/auth/queries';
 import { mapProfileUpdateToUserRow, mapUserRowToProfile, USER_COLUMNS } from '@/lib/api/auth/mappers';
 import { createBrowserClient } from '@/lib/supabase/client';
 import { clearSupabaseAuthCookies } from '@/lib/supabase/cookies';
@@ -33,6 +33,14 @@ export async function signInWithPassword(params: SignInRequest): Promise<void> {
     password: params.password
   });
 
+  // the custom access token hook refuses to mint tokens for blocked users (403)
+  if (error?.status === 403) {
+    throw {
+      message: content.blocked,
+      statusCode: 403
+    } satisfies ApiError;
+  }
+
   if (error) {
     throw {
       message: error.message,
@@ -40,10 +48,11 @@ export async function signInWithPassword(params: SignInRequest): Promise<void> {
     } satisfies ApiError;
   }
 
-  // blocked users authenticate at the supabase auth layer but must not enter the app
-  const profile = await fetchSessionProfile();
+  // fallback when the hook is not enabled in an environment: blocked users must not
+  // enter the app. rls hides a blocked user's own row, so ask the dedicated rpc.
+  const isBlocked = await fetchIsCurrentUserBlocked();
 
-  if (profile?.isBlocked) {
+  if (isBlocked) {
     await supabase.auth.signOut();
     throw {
       message: content.blocked,
@@ -219,12 +228,27 @@ export async function updateProfile(params: UpdateProfileRequest): Promise<UserP
     .single();
 
   if (error) {
-    throw {
-      // 23505 is the unique violation on users.username; the raw text leaks the constraint name
-      message: error.code === '23505' ? content.usernameTaken : error.message,
-      statusCode: error.code === '23505' ? 409 : 500
-    } satisfies ApiError;
+    throw mapProfileUpdateError(error.code, error.message);
   }
 
   return mapUserRowToProfile(data);
+}
+
+function mapProfileUpdateError(code: string, message: string): ApiError {
+  // 23505 is the unique violation on users.username; the raw text leaks the constraint name
+  if (code === '23505') {
+    return { message: content.usernameTaken, statusCode: 409 };
+  }
+
+  // 42501 comes from the privileged-column guard on public.users
+  if (code === '42501') {
+    return { message: content.forbiddenProfileChange, statusCode: 403 };
+  }
+
+  // PGRST116: rls returned no row to update, which for one's own row means the account is blocked
+  if (code === 'PGRST116') {
+    return { message: content.blocked, statusCode: 403 };
+  }
+
+  return { message, statusCode: 500 };
 }

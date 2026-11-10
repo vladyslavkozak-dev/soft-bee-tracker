@@ -4,5 +4,6 @@
   "resetLinkSent": "Reset link sent! Please check your mailbox.",
   "passwordChanged": "Password changed! You can now log in.",
   "sessionExpired": "Your session has expired. Please sign in again.",
-  "usernameTaken": "That username is already taken."
+  "usernameTaken": "That username is already taken.",
+  "forbiddenProfileChange": "You can only change your own personal details."
 }

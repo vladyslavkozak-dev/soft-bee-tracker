@@ -160,6 +160,8 @@ src/lib/api/users/
   - Claim `user_role` is set by `public.custom_access_token_hook` from `public.users.role`.
   - Never authorize from `user_metadata`. Missing claim = fail closed.
   - Follow `.cursor/rules/supabase-db.mdc` for full JWT/RLS conventions.
+- `public.users`: only self-service columns are user-writable (DB trigger guard); admin-only otherwise. Blocked users are denied by `private.is_secure()` on every table. See "Users table access" in `.cursor/rules/supabase-db.mdc`.
+- Add pgTAP tests (`supabase/tests/database/`) for every RLS/grant change.
 
 ## Postgres function rules
 

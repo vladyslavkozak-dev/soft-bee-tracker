@@ -32,6 +32,22 @@ export async function fetchSessionProfile(): Promise<UserProfile | null> {
   return mapUserRowToProfile(data);
 }
 
+// a blocked user can no longer read their own row (rls), so "no profile" and
+// "blocked" are told apart through this dedicated rpc
+export async function fetchIsCurrentUserBlocked(): Promise<boolean> {
+  const supabase = createBrowserClient();
+  const { data, error } = await supabase.rpc('current_user_is_blocked');
+
+  if (error) {
+    throw {
+      message: error.message,
+      statusCode: 500
+    } satisfies ApiError;
+  }
+
+  return data;
+}
+
 export function useSessionProfile() {
   return useQuery({
     queryKey: authKeys.sessionProfile(),
