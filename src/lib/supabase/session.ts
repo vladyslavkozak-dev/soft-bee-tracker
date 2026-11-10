@@ -2,12 +2,9 @@ import type { CookieOptions } from '@supabase/ssr';
 import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
 
-import { ALLOW_AUTHORIZED_ROUTES_LIST, PROTECTED_ROUTES_LIST, ROUTES } from '@/constants';
+import { HOME_ROUTE, NEXT_PARAM, ROUTES } from '@/constants';
+import { buildLoginPath, getRouteAccess, getRouteSessionFromClaim, getSafeRedirectPath } from '@/lib/route-access';
 import { Database } from '@/types';
-
-function pathnameMatchesRouteList(pathname: string, routes: readonly string[]): boolean {
-  return routes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
-}
 
 function applyResponseCookies(source: NextResponse, target: NextResponse) {
   source.cookies.getAll().forEach((cookie) => {
@@ -49,43 +46,63 @@ export async function updateSession(request: NextRequest) {
 
   // IMPORTANT: If you remove getClaims() and you use server-side rendering
   // with the Supabase client, your users may be randomly logged out.
+  // getClaims verifies the JWT (and refreshes it through setAll above), so the
+  // role read here is the same claims.user_role that RLS checks.
+  const { data, error } = await supabase.auth.getClaims();
+  const session = error || !data ? null : getRouteSessionFromClaim(data.claims.user_role);
 
-  const { data } = await supabase.auth.getClaims();
-  const user = data?.claims;
-
-  const { pathname } = request.nextUrl;
+  const access = getRouteAccess(request.nextUrl.pathname, session);
 
   // an access token minted before the block stays valid until it expires; rls already
   // denies it every row, so end the session here and show the blocked screen
-  if (user && pathname !== ROUTES.BLOCKED) {
+  if (session && request.nextUrl.pathname !== ROUTES.BLOCKED) {
     const { data: isBlocked } = await supabase.rpc('current_user_is_blocked');
 
     if (isBlocked) {
       // global scope revokes every refresh token of this user, not just this browser's
       await supabase.auth.signOut({ scope: 'global' });
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = ROUTES.BLOCKED;
-      const redirectResponse = NextResponse.redirect(redirectUrl);
-      applyResponseCookies(supabaseResponse, redirectResponse);
-      return redirectResponse;
+      return withSessionCookies(supabaseResponse, NextResponse.redirect(buildUrl(request, ROUTES.BLOCKED)));
     }
   }
 
-  if (!user && pathnameMatchesRouteList(pathname, PROTECTED_ROUTES_LIST)) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = ROUTES.LOGIN;
-    const redirectResponse = NextResponse.redirect(redirectUrl);
-    applyResponseCookies(supabaseResponse, redirectResponse);
-    return redirectResponse;
+  if (access === 'login') {
+    const { pathname, search } = request.nextUrl;
+    return withSessionCookies(supabaseResponse, NextResponse.redirect(new URL(buildLoginPath(`${pathname}${search}`), request.url)));
   }
 
-  if (user && pathnameMatchesRouteList(pathname, ALLOW_AUTHORIZED_ROUTES_LIST)) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = ROUTES.DASHBOARD;
-    const redirectResponse = NextResponse.redirect(redirectUrl);
-    applyResponseCookies(supabaseResponse, redirectResponse);
-    return redirectResponse;
+  if (access === 'guest-only') {
+    // already signed in (e.g. a second tab): finish the deep link instead of the dashboard
+    const nextPath = getSafeRedirectPath(request.nextUrl.searchParams.get(NEXT_PARAM)) ?? HOME_ROUTE;
+    return withSessionCookies(supabaseResponse, NextResponse.redirect(new URL(nextPath, request.url)));
+  }
+
+  if (access === 'denied') {
+    // rewrite keeps the requested URL in the address bar. a document load
+    // answers 403; a client navigation (RSC fetch) must answer 200, because the
+    // app router drops a non-OK RSC response and the click silently does nothing
+    const init = isDocumentRequest(request) ? { status: 403 } : undefined;
+    return withSessionCookies(supabaseResponse, NextResponse.rewrite(buildUrl(request, ROUTES.ACCESS_DENIED), init));
   }
 
   return supabaseResponse;
+}
+
+// next strips its own rsc header before the proxy runs, so use the browser's
+// sec-fetch-dest: 'document' for page loads, 'empty' for router fetches.
+// clients that don't send it (curl, old browsers) get the document answer.
+function isDocumentRequest(request: NextRequest): boolean {
+  const fetchDest = request.headers.get('sec-fetch-dest');
+  return fetchDest === null || fetchDest === 'document';
+}
+
+function buildUrl(request: NextRequest, pathname: string): URL {
+  const url = request.nextUrl.clone();
+  url.pathname = pathname;
+  url.search = '';
+  return url;
+}
+
+function withSessionCookies(source: NextResponse, target: NextResponse): NextResponse {
+  applyResponseCookies(source, target);
+  return target;
 }

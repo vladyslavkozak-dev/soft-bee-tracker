@@ -39,7 +39,8 @@ test.describe('Frontend and environment safeguards (E2E)', () => {
     const blockedRequests = await blockNonLocalRequests(page);
 
     await page.goto('/dashboard');
-    await expect(page).toHaveURL(/\/login$/);
+    // the requested page rides along in ?next= so login can return to it
+    await expect(page).toHaveURL(/\/login\?next=%2Fdashboard$/);
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
 
     expect(blockedRequests).toEqual([]);

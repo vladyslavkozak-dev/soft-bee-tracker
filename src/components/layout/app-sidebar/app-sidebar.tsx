@@ -19,17 +19,20 @@ import {
 } from '@ui/sidebar';
 import { LogoMark } from '@/assets/icons/logo-mark';
 import { NavUser } from '@components/layout/app-sidebar/nav-user';
-import { isNavItemActive, NAV_ITEMS } from '@components/layout/navigation';
+import { getVisibleNavItems, isNavItemActive } from '@components/layout/navigation';
 import { ROUTES } from '@/constants';
-import type { UserProfile } from '@/lib/api/auth';
+import type { UserProfile, UserRole } from '@/lib/api/auth';
 import content from '../content.json';
 
 interface AppSidebarProps {
   profile: UserProfile;
+  // from the user_role claim (getRouteSession), not profile.role, so links match the proxy
+  role: UserRole | null;
 }
 
-export function AppSidebar({ profile }: AppSidebarProps) {
+export function AppSidebar({ profile, role }: AppSidebarProps) {
   const pathname = usePathname();
+  const navItems = getVisibleNavItems(role);
   const { isMobile, setOpenMobile } = useSidebar();
 
   function handleNavigate() {
@@ -66,7 +69,7 @@ export function AppSidebar({ profile }: AppSidebarProps) {
           <SidebarGroupLabel>{content.sidebar.workspaceGroup}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className='gap-1'>
-              {NAV_ITEMS.map((item) => (
+              {navItems.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     isActive={isNavItemActive(pathname, item.href)}

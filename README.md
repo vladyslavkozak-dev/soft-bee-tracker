@@ -94,10 +94,11 @@ src/
 │   └── lib/              # App-scoped utilities (supabase clients, legacy api)
 ├── components/
 │   └── ui/               # shadcn/ui primitives
-├── constants/            # Route lists and shared constants
+├── constants/            # Routes, route-access rules, shared constants
 ├── features/             # Feature UI modules
 ├── lib/
 │   ├── api/              # Domain data access (TanStack Query hooks)
+│   ├── route-access.ts   # Route guard decisions (public, login, role)
 │   └── utils.ts          # Shared helpers (cn, etc.)
 ├── providers/            # React context providers (QueryClient)
 └── types/                # Shared TypeScript types (Database, ApiError)
@@ -127,6 +128,28 @@ src/lib/api/users/
 ```
 
 Components import hooks from `@/lib/api/<feature>`. They must not call Supabase, `fetch`, or Axios directly. Domain types alias generated database types. A mapper exists only when a value changes at runtime. See `.cursor/rules/lib-services.mdc`.
+
+### Route protection
+
+`src/proxy.ts` runs `updateSession` (`src/lib/supabase/session.ts`) on every request. It refreshes the Supabase session, reads the verified `user_role` JWT claim (the same claim RLS checks), and asks `getRouteAccess` in `src/lib/route-access.ts` what to do:
+
+| Result | Response |
+|--------|----------|
+| No session on a protected route | Redirect to `/login?next=<requested page>`; after sign-in the user lands back there |
+| Signed in on `/login` | Redirect to a safe `next` path, else `/tracker` |
+| Role not allowed | Rewrite to `/access-denied` (the URL stays the same): status 403 on a page load, 200 on an in-app navigation so the router renders it in place |
+
+Every app page calls `requireRouteAccess(ROUTES.X)` from `@/lib/api/auth/server` at the top of `page.tsx`. It re-runs the proxy's `getRouteAccess` decision with the role from the same verified `user_role` claim, then loads the profile: `getUser()` asks the Auth server (catching revoked sessions that a locally verified JWT can't), and a revoked session or one without a profile row is sent to `/auth/sign-out`, which clears the cookies and returns to `/login`. A blocked user goes through the same route and lands on `/blocked`, which says why. No session redirects to `/login`, and a wrong role redirects to `/access-denied`. A session with no role is offered "Sign in again" there, since only a new token carries a new claim.
+
+The sidebar (`src/components/layout/app-sidebar/app-sidebar.tsx`) uses the same rules and the same claim to hide links a role can't open.
+
+The access rules live in `src/constants/index.ts`: `PUBLIC_ROUTES_LIST`, `GUEST_ONLY_ROUTES_LIST` and `ROLE_RESTRICTED_ROUTES`. `requireRouteAccess` does not restrict anything by itself: a route missing from `ROLE_RESTRICTED_ROUTES` is open to every signed-in role. To add a page, add it to `ROUTES`, classify it in `ROUTE_CLASSIFICATION` in `src/lib/route-access.test.ts` (typecheck fails until you do), add it to `ROLE_RESTRICTED_ROUTES` if it is role-restricted, and call `requireRouteAccess` in its `page.tsx`. The proxy, page checks and sidebar all read the role from the `user_role` claim (`getRouteSessionFromClaim`), never from `public.users`, so they can't disagree. A missing or unknown role is denied. Hiding a page is not data security: RLS still decides what each request can read or write.
+
+#### Verify route protection
+
+1. `yarn test` runs the route matrix (`src/lib/route-access.test.ts`), the proxy responses and cookie handling (`src/lib/supabase/session.test.ts`), and the page check (`src/lib/api/auth/server.test.ts`).
+2. With `yarn dev` and the seeded [test accounts](#test-accounts): signed out, every app route redirects to `/login`. As `worker@softbee.dev`, `/crew` and `/reports` show the access-denied page with status 403, and the sidebar shows only Tracker and Projects. As `manager@softbee.dev` or `admin@softbee.dev`, every route opens and the sidebar adds Crew and Reports. `/terms` and `/blocked` open signed out, and a signed-in user can open `/register` (the invite flow). Signed out, open `/tracker?tab=week`, sign in, and you land back on it.
+3. Direct API requests ignore the UI. Sign in through `POST /auth/v1/token?grant_type=password`, then call `/rest/v1/users` with the access token. Each user, any role, sees only their own row, and the anon key sees none.
 
 ### State management
 
@@ -227,18 +250,25 @@ When you change a shared rule, update every instruction file that states it so t
 3. `git status` does not list `.env`.
 4. Ask your agent: *"What are this repo's rules for data access and secrets?"* The answer should mention importing from `@/lib/api/<entity>` only, no direct Supabase or `fetch` calls in UI, and that `SUPABASE_SECRET_KEY` is server-only.
 
-## Planned routes
+## Routes and access
 
-| Route | Purpose |
-|-------|---------|
-| `/login` | Authentication |
-| `/register` | User registration |
-| `/dashboard` | Post-login landing |
-| `/tracker` | Time tracking |
-| `/crew` | Crew management |
-| `/projects` | Project management |
-| `/reports` | Reporting |
-| `/profile` | User profile settings |
+| Route | Purpose | Access |
+|-------|---------|--------|
+| `/login` | Sign in | Signed out only (signed-in users go to `/tracker`) |
+| `/register` | Finish an invite (set a password) | Public; the invite link signs the user in first |
+| `/forgot-password`, `/auth/confirm`, `/auth/update-password` | Password recovery and email links | Public |
+| `/auth/sign-out` | Clears a broken, revoked or blocked session | Public |
+| `/access-denied`, `/blocked` | Shown when a role can't open a page, or the account is blocked | Public |
+| `/terms` | Terms of use | Public |
+| `/`, `/dashboard` | Redirect to `/tracker` | Any signed-in role |
+| `/tracker` | Time tracking | Any signed-in role |
+| `/projects` | Projects (read-only for workers, enforced by RLS) | Any signed-in role |
+| `/profile` | User profile settings | Any signed-in role |
+| `/crew` | Crew management | Manager, admin |
+| `/reports` | Reporting | Manager, admin |
+| `/users` | Redirects to `/crew` (user management lives there) | Any signed-in role, then Crew's rule |
+
+Any route not listed needs a session; there is no public-by-default route.
 
 ## AI change workflow
 

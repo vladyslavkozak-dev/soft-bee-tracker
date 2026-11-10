@@ -15,11 +15,11 @@ import { useSignIn } from '@/lib/api/auth';
 import { loginFormSchema, type LoginFormValues } from '@/lib/schemas/login-form.schema';
 import content from './content.json';
 
-export function LoginForm() {
+export function LoginForm({ redirectTo }: LoginFormProps) {
   const router = useRouter();
   const signIn = useSignIn({
     onSuccess: () => {
-      router.push(ROUTES.DASHBOARD);
+      router.push(redirectTo);
       router.refresh();
     }
   });
@@ -86,4 +86,9 @@ export function LoginForm() {
       </div>
     </form>
   );
+}
+
+interface LoginFormProps {
+  // already validated by getSafeRedirectPath on the server
+  redirectTo: string;
 }

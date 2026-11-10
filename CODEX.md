@@ -15,6 +15,7 @@
 - Keep pure reads in `queries.ts`, pure writes in `mutations.ts`, and domain contracts in `types.ts`. Domain types alias generated `Database` types. Add `mappers.ts` only when a value changes at runtime; see `.cursor/rules/lib-services.mdc`.
 - Normalize async failures to `ApiError` and preserve the Supabase response status.
 - Add or update Vitest coverage for query and mutation helpers: success and failure (normalized `ApiError`).
+- Route access is decided by `getRouteAccess` (`src/lib/route-access.ts`) from the verified `user_role` JWT claim; rules live in `src/constants/index.ts`. Every app `page.tsx` calls `requireRouteAccess` (`@/lib/api/auth/server`) at the top. It only applies the rules, so restrict a page by adding it to `ROLE_RESTRICTED_ROUTES`, and classify every new route in `ROUTE_CLASSIFICATION` (`src/lib/route-access.test.ts`); unlisted routes allow every signed-in role, and a missing role fails closed. Never read the role from `user_metadata` or `public.users`.
 
 ## Scope filter for frontend conventions
 

@@ -1,20 +1,14 @@
-import { redirect } from 'next/navigation';
-
 import { PageHeader } from '@components/common/page-header/page-header';
 import { CreateTrackerDialog } from '@components/tracker/create-tracker-dialog/create-tracker-dialog';
 import { TrackerOverview } from '@components/tracker/tracker-overview/tracker-overview';
 import { TrackerWorkspace } from '@components/tracker/tracker-workspace/tracker-workspace';
 import { ROUTES } from '@/constants';
-import { getSessionProfile } from '@/lib/api/auth/server';
+import { requireRouteAccess } from '@/lib/api/auth/server';
 import { formatText } from '@/lib/format-text';
 import content from './content.json';
 
 export default async function TrackerPage() {
-  const profile = await getSessionProfile();
-
-  if (!profile) {
-    redirect(ROUTES.LOGIN);
-  }
+  const profile = await requireRouteAccess(ROUTES.TRACKER);
 
   return (
     <>
